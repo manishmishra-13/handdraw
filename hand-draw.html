@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HandCanvas — Draw with Your Hands</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --border: #1e1e2e;
+    --accent: #7c6aff;
+    --accent2: #ff6ac1;
+    --accent3: #6affb8;
+    --text: #e8e8f0;
+    --muted: #5a5a7a;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  #splash {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 100;
+    gap: 2rem;
+  }
+
+  .splash-title {
+    font-family: 'Space Mono', monospace;
+    font-size: clamp(2rem, 6vw, 5rem);
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--accent2), var(--accent3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.02em;
+    text-align: center;
+  }
+
+  .splash-sub {
+    color: var(--muted);
+    font-size: 1.1rem;
+    text-align: center;
+    max-width: 420px;
+    line-height: 1.6;
+  }
+
+  .gesture-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    max-width: 560px;
+    width: 90%;
+  }
+
+  .gesture-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.9rem;
+    text-align: center;
+  }
+
+  .gesture-card .icon { font-size: 1.8rem; margin-bottom: 0.3rem; }
+  .gesture-card .label { font-size: 0.75rem; color: var(--muted); line-height: 1.3; }
+
+  .btn-start {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none;
+    color: white;
+    padding: 0.9rem 2.5rem;
+    border-radius: 50px;
+    font-size: 1.1rem;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s, opacity 0.2s;
+    letter-spacing: 0.02em;
+  }
+  .btn-start:hover { transform: scale(1.05); opacity: 0.9; }
+
+  /* Main app */
+  #app { display: none; position: fixed; inset: 0; }
+
+  /* Pages */
+  #pages-container {
+    position: absolute; inset: 0;
+    display: flex;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .page {
+    flex-shrink: 0;
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+  }
+
+  .draw-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    cursor: none;
+    background: transparent;
+  }
+
+  /* Camera feed */
+  #cam-wrap {
+    position: fixed;
+    bottom: 1.5rem; right: 1.5rem;
+    width: 200px; height: 150px;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 2px solid var(--border);
+    z-index: 50;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+
+  #cam-wrap video, #cam-wrap canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+  }
+
+  /* HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 1rem 1.5rem;
+    display: flex; align-items: center; gap: 1rem;
+    z-index: 40;
+    background: linear-gradient(to bottom, rgba(10,10,15,0.9), transparent);
+    pointer-events: none;
+  }
+
+  #page-indicator {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.3rem 0.75rem;
+    pointer-events: all;
+  }
+
+  #status-badge {
+    font-size: 0.75rem;
+    padding: 0.3rem 0.8rem;
+    border-radius: 50px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    display: flex; align-items: center; gap: 0.4rem;
+    font-family: 'Space Mono', monospace;
+    color: var(--muted);
+    transition: all 0.3s;
+  }
+
+  #status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+
+  .status-draw #status-dot { background: var(--accent3); }
+  .status-erase #status-dot { background: var(--accent2); }
+  .status-zoom #status-dot { background: #ffd06a; }
+
+  /* Color picker */
+  #color-bar {
+    position: fixed; left: 1.5rem; top: 50%;
+    transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 0.5rem;
+    z-index: 40;
+  }
+
+  .color-btn {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+
+  .color-btn.active, .color-btn:hover {
+    transform: scale(1.3);
+    border-color: white;
+  }
+
+  /* Brush size */
+  #brush-bar {
+    position: fixed; left: 1.5rem; bottom: 1.5rem;
+    display: flex; flex-direction: column; gap: 0.4rem;
+    z-index: 40;
+    align-items: center;
+  }
+
+  .brush-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.7rem;
+    padding: 0.3rem 0.5rem;
+    cursor: pointer;
+    font-family: 'Space Mono', monospace;
+    transition: background 0.2s;
+  }
+  .brush-btn:hover, .brush-btn.active { background: var(--accent); border-color: var(--accent); }
+
+  /* Cursor */
+  #cursor {
+    position: fixed;
+    pointer-events: none;
+    z-index: 999;
+    transition: transform 0.05s linear;
+  }
+
+  .cursor-ring {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    transform: translate(-50%, -50%);
+    transition: width 0.15s, height 0.15s, border-color 0.15s, background 0.15s;
+  }
+
+  .cursor-dot {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    transition: background 0.15s;
+  }
+
+  /* Toast */
+  #toast {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.8);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1rem 2rem;
+    font-size: 1.5rem;
+    font-family: 'Space Mono', monospace;
+    z-index: 200;
+    opacity: 0;
+    pointer-events: none;
+    text-align: center;
+    backdrop-filter: blur(12px);
+  }
+
+  /* Page backgrounds */
+  .page:nth-child(1) { background: #0a0a0f; }
+  .page:nth-child(2) { background: #080a14; }
+  .page:nth-child(3) { background: #0a080f; }
+  .page:nth-child(4) { background: #080f0a; }
+  .page:nth-child(5) { background: #0f080a; }
+
+  .page-label {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Space Mono', monospace;
+    font-size: 8rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.03);
+    pointer-events: none;
+    user-select: none;
+  }
+
+  #loading-bar {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    z-index: 300;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.3s;
+  }
+
+  #gesture-hint {
+    position: fixed;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    z-index: 40;
+    text-align: center;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading bar -->
+<div id="loading-bar"></div>
+
+<!-- Toast notifications -->
+<div id="toast"></div>
+
+<!-- Cursor -->
+<div id="cursor">
+  <div class="cursor-ring">
+    <div class="cursor-dot"></div>
+  </div>
+</div>
+
+<!-- SPLASH SCREEN -->
+<div id="splash">
+  <div class="splash-title">✋ HandCanvas</div>
+  <p class="splash-sub">Draw, write, and navigate using only your hands. No mouse. No keyboard. Just gestures.</p>
+  
+  <div class="gesture-grid">
+    <div class="gesture-card">
+      <div class="icon">☝️</div>
+      <div class="label">Index finger<br>to draw</div>
+    </div>
+    <div class="gesture-card">
+      <div class="icon">✌️</div>
+      <div class="label">2 fingers<br>to erase</div>
+    </div>
+    <div class="gesture-card">
+      <div class="icon">🤌</div>
+      <div class="label">Pinch<br>zoom in/out</div>
+    </div>
+    <div class="gesture-card">
+      <div class="icon">✋</div>
+      <div class="label">Open palm<br>clear canvas</div>
+    </div>
+    <div class="gesture-card">
+      <div class="icon">👏</div>
+      <div class="label">Clap once<br>new page</div>
+    </div>
+    <div class="gesture-card">
+      <div class="icon">👈👉</div>
+      <div class="label">Swipe left/right<br>navigate pages</div>
+    </div>
+  </div>
+
+  <button class="btn-start" onclick="startApp()">Enable Camera & Start →</button>
+  <p style="font-size:0.72rem; color:var(--muted); margin-top:-0.5rem">Camera stays on your device. Nothing is uploaded.</p>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <!-- Pages -->
+  <div id="pages-container"></div>
+
+  <!-- Camera -->
+  <div id="cam-wrap">
+    <video id="cam-video" autoplay muted playsinline></video>
+    <canvas id="cam-canvas"></canvas>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="page-indicator">Page <span id="cur-page">1</span> / <span id="total-pages">1</span></div>
+    <div id="status-badge">
+      <div id="status-dot"></div>
+      <span id="status-text">Initializing…</span>
+    </div>
+  </div>
+
+  <!-- Color bar -->
+  <div id="color-bar"></div>
+
+  <!-- Brush bar -->
+  <div id="brush-bar">
+    <div style="font-size:0.65rem; color:var(--muted); font-family:'Space Mono',monospace; margin-bottom:0.2rem;">SIZE</div>
+  </div>
+
+  <!-- Gesture hint -->
+  <div id="gesture-hint">☝️ Raise index finger to draw · ✋ Open palm to clear · 👏 Clap for new page</div>
+</div>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+<script>
+// ─── CONFIG ────────────────────────────────────────────────────────────────
+const COLORS = ['#7c6aff','#ff6ac1','#6affb8','#ffd06a','#ff6a6a','#6ac8ff','#ffffff'];
+const BRUSHES = [3, 6, 12, 20];
+const MAX_PAGES = 10;
+
+// ─── STATE ─────────────────────────────────────────────────────────────────
+let pages = [];
+let currentPage = 0;
+let currentColor = COLORS[0];
+let brushSize = 6;
+let isDrawing = false;
+let lastX = null, lastY = null;
+let mode = 'idle'; // idle | draw | erase | zoom
+let zoomLevel = 1;
+let prevPinchDist = null;
+let handVisible = false;
+let swipeStartX = null;
+let swipeStartY = null;
+let isSwiping = false;
+let gestureHistory = [];
+let palmHistory = [];
+let clapsDetected = 0;
+let lastClapTime = 0;
+let lastHandDist = null;
+
+// ─── DOM ───────────────────────────────────────────────────────────────────
+const appEl = document.getElementById('app');
+const pagesContainer = document.getElementById('pages-container');
+const camVideo = document.getElementById('cam-video');
+const camCanvas = document.getElementById('cam-canvas');
+const cursorEl = document.getElementById('cursor');
+const cursorRing = cursorEl.querySelector('.cursor-ring');
+const cursorDot = cursorEl.querySelector('.cursor-dot');
+const statusBadge = document.getElementById('status-badge');
+const statusText = document.getElementById('status-text');
+const statusDot = document.getElementById('status-dot');
+const pageIndicator = document.getElementById('page-indicator');
+const toastEl = document.getElementById('toast');
+
+// ─── INIT ──────────────────────────────────────────────────────────────────
+function buildColorBar() {
+  const bar = document.getElementById('color-bar');
+  COLORS.forEach((c, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'color-btn' + (i === 0 ? ' active' : '');
+    btn.style.background = c;
+    btn.onclick = () => {
+      document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentColor = c;
+    };
+    bar.appendChild(btn);
+  });
+}
+
+function buildBrushBar() {
+  const bar = document.getElementById('brush-bar');
+  BRUSHES.forEach((s, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'brush-btn' + (i === 1 ? ' active' : '');
+    btn.textContent = s + 'px';
+    btn.onclick = () => {
+      document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      brushSize = s;
+    };
+    bar.appendChild(btn);
+  });
+}
+
+function createPage() {
+  const pageEl = document.createElement('div');
+  pageEl.className = 'page';
+  const label = document.createElement('div');
+  label.className = 'page-label';
+  label.textContent = pages.length + 1;
+  pageEl.appendChild(label);
+  const canvas = document.createElement('canvas');
+  canvas.className = 'draw-canvas';
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  pageEl.appendChild(canvas);
+  pagesContainer.appendChild(pageEl);
+  pages.push({ el: pageEl, canvas, ctx: canvas.getContext('2d'), zoom: 1 });
+  updatePageHUD();
+}
+
+function updatePageHUD() {
+  document.getElementById('cur-page').textContent = currentPage + 1;
+  document.getElementById('total-pages').textContent = pages.length;
+}
+
+function goToPage(idx) {
+  if (idx < 0 || idx >= pages.length) return;
+  currentPage = idx;
+  pagesContainer.style.transform = `translateX(-${currentPage * 100}vw)`;
+  updatePageHUD();
+  isDrawing = false;
+  lastX = null; lastY = null;
+  showToast(`Page ${currentPage + 1}`);
+}
+
+function newPage() {
+  if (pages.length >= MAX_PAGES) { showToast('Max pages reached!'); return; }
+  createPage();
+  goToPage(pages.length - 1);
+  showToast('✨ New Page');
+}
+
+// ─── DRAWING ───────────────────────────────────────────────────────────────
+function getActiveCtx() {
+  return pages[currentPage]?.ctx;
+}
+
+function drawPoint(x, y) {
+  const ctx = getActiveCtx();
+  if (!ctx) return;
+  ctx.save();
+  ctx.globalCompositeOperation = mode === 'erase' ? 'destination-out' : 'source-over';
+  ctx.strokeStyle = currentColor;
+  ctx.lineWidth = mode === 'erase' ? brushSize * 4 : brushSize;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowBlur = mode === 'erase' ? 0 : 8;
+  ctx.shadowColor = currentColor;
+  ctx.globalAlpha = mode === 'erase' ? 1 : 0.92;
+
+  if (lastX !== null && lastY !== null) {
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.arc(x, y, (mode === 'erase' ? brushSize * 2 : brushSize / 2), 0, Math.PI * 2);
+    ctx.fillStyle = currentColor;
+    ctx.fill();
+  }
+  ctx.restore();
+  lastX = x; lastY = y;
+}
+
+function clearCurrentPage() {
+  const ctx = getActiveCtx();
+  if (!ctx) return;
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  showToast('🧹 Cleared');
+}
+
+// ─── CURSOR ────────────────────────────────────────────────────────────────
+function updateCursor(x, y, m) {
+  cursorEl.style.left = x + 'px';
+  cursorEl.style.top = y + 'px';
+  if (m === 'draw') {
+    cursorRing.style.width = (brushSize * 2 + 10) + 'px';
+    cursorRing.style.height = (brushSize * 2 + 10) + 'px';
+    cursorRing.style.borderColor = currentColor;
+    cursorDot.style.background = currentColor;
+  } else if (m === 'erase') {
+    cursorRing.style.width = (brushSize * 8 + 10) + 'px';
+    cursorRing.style.height = (brushSize * 8 + 10) + 'px';
+    cursorRing.style.borderColor = '#ff6ac1';
+    cursorDot.style.background = '#ff6ac1';
+  } else if (m === 'zoom') {
+    cursorRing.style.width = '50px';
+    cursorRing.style.height = '50px';
+    cursorRing.style.borderColor = '#ffd06a';
+    cursorDot.style.background = '#ffd06a';
+  } else {
+    cursorRing.style.width = '30px';
+    cursorRing.style.height = '30px';
+    cursorRing.style.borderColor = 'var(--muted)';
+    cursorDot.style.background = 'var(--muted)';
+  }
+}
+
+// ─── STATUS ────────────────────────────────────────────────────────────────
+function setStatus(m, label) {
+  statusBadge.className = `status-${m}`;
+  statusText.textContent = label;
+  statusDot.style.background = m === 'draw' ? '#6affb8' : m === 'erase' ? '#ff6ac1' : m === 'zoom' ? '#ffd06a' : 'var(--muted)';
+}
+
+// ─── TOAST ─────────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  clearTimeout(toastTimer);
+  gsap.killTweensOf(toastEl);
+  gsap.to(toastEl, { opacity: 1, scale: 1, duration: 0.2, ease: 'back.out(2)' });
+  toastTimer = setTimeout(() => {
+    gsap.to(toastEl, { opacity: 0, scale: 0.85, duration: 0.3 });
+  }, 1200);
+}
+
+// ─── GEOMETRY HELPERS ──────────────────────────────────────────────────────
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function fingerTip(lm, i) {
+  return { x: lm[i].x, y: lm[i].y };
+}
+
+function isFingerUp(lm, tip, pip) {
+  return lm[tip].y < lm[pip].y;
+}
+
+// Count extended fingers (approximate)
+function countExtended(lm) {
+  let count = 0;
+  const fingers = [[8,6],[12,10],[16,14],[20,18]];
+  fingers.forEach(([tip, pip]) => {
+    if (lm[tip].y < lm[pip].y - 0.02) count++;
+  });
+  // Thumb
+  if (lm[4].x < lm[3].x - 0.02 || lm[4].x > lm[3].x + 0.02) count++;
+  return count;
+}
+
+function isOpenPalm(lm) {
+  return countExtended(lm) >= 4;
+}
+
+// ─── MEDIAPIPE HANDS ───────────────────────────────────────────────────────
+async function startApp() {
+  document.getElementById('splash').style.display = 'none';
+  document.getElementById('loading-bar').style.transform = 'scaleX(0.3)';
+
+  buildColorBar();
+  buildBrushBar();
+  createPage(); // First page
+
+  appEl.style.display = 'block';
+
+  // Camera
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+  camVideo.srcObject = stream;
+  await new Promise(r => camVideo.onloadedmetadata = r);
+  camCanvas.width = camVideo.videoWidth;
+  camCanvas.height = camVideo.videoHeight;
+
+  document.getElementById('loading-bar').style.transform = 'scaleX(0.6)';
+
+  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6
+  });
+  hands.onResults(onHandResults);
+
+  const camera = new Camera(camVideo, {
+    onFrame: async () => { await hands.send({ image: camVideo }); },
+    width: 640, height: 480
+  });
+  camera.start();
+
+  document.getElementById('loading-bar').style.transform = 'scaleX(1)';
+  setTimeout(() => { document.getElementById('loading-bar').style.opacity = 0; }, 500);
+  setStatus('idle', 'No hand detected');
+}
+
+// ─── HAND RESULTS ──────────────────────────────────────────────────────────
+const camCtx = document.getElementById('cam-canvas').getContext('2d');
+
+function onHandResults(results) {
+  // Draw landmarks on mini cam
+  camCtx.save();
+  camCtx.clearRect(0, 0, camCanvas.width, camCanvas.height);
+  camCtx.translate(camCanvas.width, 0);
+  camCtx.scale(-1, 1);
+  if (results.multiHandLandmarks) {
+    for (const lm of results.multiHandLandmarks) {
+      drawConnectors(camCtx, lm, HAND_CONNECTIONS, { color: 'rgba(124,106,255,0.6)', lineWidth: 1 });
+      drawLandmarks(camCtx, lm, { color: '#ff6ac1', lineWidth: 1, radius: 2 });
+    }
+  }
+  camCtx.restore();
+
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    handVisible = false;
+    isDrawing = false;
+    lastX = null; lastY = null;
+    prevPinchDist = null;
+    swipeStartX = null;
+    setStatus('idle', 'No hand detected');
+    return;
+  }
+
+  handVisible = true;
+  const lm = results.multiHandLandmarks[0];
+
+  // Mirror coords (camera is mirrored)
+  const tip = fingerTip(lm, 8); // index tip
+  const screenX = (1 - tip.x) * window.innerWidth;
+  const screenY = tip.y * window.innerHeight;
+
+  // ── Detect gesture ──
+  const extended = countExtended(lm);
+  const palmOpen = isOpenPalm(lm);
+
+  // Pinch: thumb tip (4) + index tip (8)
+  const thumbTip = lm[4];
+  const indexTip = lm[8];
+  const pinchDist = dist(thumbTip, indexTip);
+
+  // Two-hand clap detection
+  let clapDetected = false;
+  if (results.multiHandLandmarks.length === 2) {
+    const lm2 = results.multiHandLandmarks[1];
+    const wrist1 = lm[0];
+    const wrist2 = lm2[0];
+    const d = dist(wrist1, wrist2);
+    if (lastHandDist !== null) {
+      if (lastHandDist > 0.25 && d < 0.12) {
+        const now = Date.now();
+        if (now - lastClapTime > 800) {
+          clapDetected = true;
+          lastClapTime = now;
+          newPage();
+        }
+      }
+    }
+    lastHandDist = d;
+  } else {
+    lastHandDist = null;
+  }
+
+  // ── Swipe detection ──
+  const indexExtended = isFingerUp(lm, 8, 6);
+  const middleExtended = isFingerUp(lm, 12, 10);
+  const ringDown = !isFingerUp(lm, 16, 14);
+  const pinkyDown = !isFingerUp(lm, 20, 18);
+  const isSwipeGesture = indexExtended && middleExtended && ringDown && pinkyDown;
+
+  if (isSwipeGesture && !isSwiping) {
+    swipeStartX = tip.x;
+    swipeStartY = tip.y;
+    isSwiping = true;
+  }
+
+  if (isSwiping && isSwipeGesture) {
+    const dx = tip.x - swipeStartX;
+    if (Math.abs(dx) > 0.18) {
+      if (dx < 0) { goToPage(currentPage + 1); }
+      else { goToPage(currentPage - 1); }
+      isSwiping = false;
+      swipeStartX = null;
+    }
+  } else if (!isSwipeGesture) {
+    isSwiping = false;
+    swipeStartX = null;
+  }
+
+  // ── Pinch zoom ──
+  const isPinching = pinchDist < 0.07 && extended <= 2;
+
+  if (isPinching) {
+    if (prevPinchDist !== null) {
+      const delta = pinchDist - prevPinchDist;
+      const canvas = pages[currentPage]?.canvas;
+      if (canvas) {
+        zoomLevel = Math.max(0.5, Math.min(4, zoomLevel + delta * 8));
+        canvas.style.transform = `scale(${zoomLevel})`;
+        canvas.style.transformOrigin = 'center center';
+      }
+    }
+    prevPinchDist = pinchDist;
+    mode = 'zoom';
+    setStatus('zoom', `Zoom ${zoomLevel.toFixed(1)}×`);
+    updateCursor(screenX, screenY, 'zoom');
+    isDrawing = false; lastX = null; lastY = null;
+    return;
+  } else {
+    prevPinchDist = null;
+  }
+
+  // ── Palm clear ──
+  if (palmOpen && extended >= 4) {
+    palmHistory.push(true);
+    if (palmHistory.length > 12) palmHistory.shift();
+    const allPalm = palmHistory.filter(Boolean).length;
+    if (allPalm > 10) {
+      clearCurrentPage();
+      palmHistory = [];
+    }
+    mode = 'idle';
+    setStatus('idle', '✋ Palm — hold to clear');
+    isDrawing = false; lastX = null; lastY = null;
+    updateCursor(screenX, screenY, 'idle');
+    return;
+  } else {
+    palmHistory.push(false);
+    if (palmHistory.length > 12) palmHistory.shift();
+  }
+
+  // ── Two-finger erase ──
+  const onlyTwoFingers = indexExtended && middleExtended && !isFingerUp(lm, 16, 14) && !isFingerUp(lm, 20, 18);
+  if (onlyTwoFingers && !isSwipeGesture) {
+    mode = 'erase';
+    setStatus('erase', 'Erase Mode');
+    updateCursor(screenX, screenY, 'erase');
+    drawPoint(screenX, screenY);
+    return;
+  }
+
+  // ── Index finger draw ──
+  const onlyIndex = indexExtended && !middleExtended && !isFingerUp(lm, 16, 14) && !isFingerUp(lm, 20, 18);
+  if (onlyIndex) {
+    mode = 'draw';
+    setStatus('draw', 'Drawing');
+    updateCursor(screenX, screenY, 'draw');
+    drawPoint(screenX, screenY);
+  } else {
+    mode = 'idle';
+    setStatus('idle', 'Hand detected');
+    updateCursor(screenX, screenY, 'idle');
+    isDrawing = false;
+    lastX = null; lastY = null;
+  }
+}
+
+// ─── KEYBOARD SHORTCUTS ────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') goToPage(currentPage + 1);
+  if (e.key === 'ArrowLeft') goToPage(currentPage - 1);
+  if (e.key === 'n' || e.key === 'N') newPage();
+  if (e.key === 'c' || e.key === 'C') clearCurrentPage();
+  if (e.key === 'Escape') { isDrawing = false; lastX = null; lastY = null; }
+});
+
+// ─── RESIZE ────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  pages.forEach(p => {
+    const imgData = p.ctx.getImageData(0, 0, p.canvas.width, p.canvas.height);
+    p.canvas.width = window.innerWidth;
+    p.canvas.height = window.innerHeight;
+    p.ctx.putImageData(imgData, 0, 0);
+  });
+});
+
+// ─── MOUSE FALLBACK ─────────────────────────────────────────────────────────
+let mouseDown = false;
+window.addEventListener('mousedown', e => { if (e.button === 0) { mouseDown = true; mode = 'draw'; } });
+window.addEventListener('mouseup', () => { mouseDown = false; lastX = null; lastY = null; });
+window.addEventListener('mousemove', e => {
+  if (!handVisible) {
+    updateCursor(e.clientX, e.clientY, mouseDown ? 'draw' : 'idle');
+    if (mouseDown) drawPoint(e.clientX, e.clientY);
+    else { lastX = null; lastY = null; }
+  }
+});
+</script>
+</body>
+</html>
